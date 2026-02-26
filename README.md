@@ -1,36 +1,57 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Multiplayer Tic Tac Toe
+
+A real-time multiplayer Tic Tac Toe game built with Next.js (App Router), Socket.IO, TypeScript, and Tailwind CSS.
+
+## Features
+- **Real-time Multiplayer**: Play instantly with friends using Socket.IO WebSockets.
+- **Room-based Gameplay**: Create a private room and share the 8-character code.
+- **Modern UI**: Built with Tailwind CSS and Lucide React icons, featuring a sleek dark mode design with glassmorphism effects.
+- **Responsive Navigation**: Enjoy the game on desktop or mobile devices.
+- **Game Status Tracking**: Automatic win, lose, turn, and draw detection.
+
+## Prerequisites
+- Node.js (v18+ recommended)
+- npm
 
 ## Getting Started
 
-First, run the development server:
+1. **Install Dependencies** (if not already installed)
+   ```bash
+   npm install
+   ```
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+2. **Start the Development Environment**
+   You need to run both the Socket.IO backend server and the Next.js frontend server.
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+   **Terminal 1 (Backend Server):**
+   ```bash
+   npm run server
+   ```
+   *This starts the Express + Socket.IO server on port 3001.*
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+   **Terminal 2 (Frontend Next.js App):**
+   ```bash
+   npm run dev
+   ```
+   *This starts the Next.js development server on port 3000.*
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+3. **Play the Game**
+   - Open your browser and navigate to `http://localhost:3000`.
+   - Click **Create Room** to start a new game.
+   - Copy the short Room ID and send it to your friend (or open a new incognito window).
+   - In the second window, paste the Room ID into the join input and click **Join Room**.
 
-## Learn More
+## Tech Stack
+- **Framework**: Next.js 15 (App Router)
+- **Styling**: Tailwind CSS v4
+- **Language**: TypeScript
+- **WebSockets**: Socket.IO & Express (Custom Node server)
+- **Icons**: Lucide React
+- **Notifications**: Sonner
 
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Architecture
+- `server/socketServer.ts`: The authoritative backend server managing room states, player connections, and win logic.
+- `src/app/page.tsx`: The landing page for creating and joining rooms.
+- `src/app/room/[roomId]/page.tsx`: The active game room connecting to the socket and rendering the game state.
+- `src/components/*`: Reusable UI components including the GameBoard, Square, Navbar, and RoomControls.
+# multiplayer-tic-tac-toe-game
