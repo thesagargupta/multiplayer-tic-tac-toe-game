@@ -10,9 +10,12 @@
     "server": "tsx server/socketServer.ts"
   },
   "dependencies": {
+    "@upstash/redis": "^1.36.2",
     "express": "^5.2.1",
     "lucide-react": "^0.575.0",
     "next": "16.1.6",
+    "pusher": "^5.3.2",
+    "pusher-js": "^8.4.0",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "socket.io": "^4.8.3",

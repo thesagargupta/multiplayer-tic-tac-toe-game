@@ -1,16 +1,28 @@
-'use client';
+﻿'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { socket } from '@/lib/socket';
-import { GameState, Player, MovePayload } from '@/types/game';
+import { pusherClient } from '@/lib/pusherClient';
+import { GameState } from '@/types/game';
 import Navbar from '@/components/Navbar';
 import GameBoard from '@/components/GameBoard';
 import RoomControls from '@/components/RoomControls';
 import { Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
+import { v4 as uuidv4 } from 'uuid';
+import type { Channel } from 'pusher-js';
 
-// The Next.js 15 App router expects params as a Promise for async components, but since this is a Client Component, we can use React.use() wrapper or in this case use useParams but to avoid type issues we just use any
+/** Get or create a stable per-browser-session player ID */
+function getPlayerId(): string {
+    if (typeof window === 'undefined') return '';
+    let id = sessionStorage.getItem('playerId');
+    if (!id) {
+        id = uuidv4();
+        sessionStorage.setItem('playerId', id);
+    }
+    return id;
+}
+
 export default function GameRoom({ params }: { params: Promise<{ roomId: string }> }) {
     const { roomId } = React.use(params);
     const searchParams = useSearchParams();
@@ -19,81 +31,122 @@ export default function GameRoom({ params }: { params: Promise<{ roomId: string 
     const [isConnected, setIsConnected] = useState(false);
     const [gameState, setGameState] = useState<GameState | null>(null);
     const [playerSymbol, setPlayerSymbol] = useState<'X' | 'O' | null>(null);
-    const [playersCounter, setPlayersCounter] = useState<number>(0);
+    const [isOpponentConnected, setIsOpponentConnected] = useState(false);
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
+    const channelRef = useRef<Channel | null>(null);
+    const playerIdRef = useRef<string>('');
+
     useEffect(() => {
-        socket.connect();
+        const playerId = getPlayerId();
+        playerIdRef.current = playerId;
 
-        socket.on('connect', () => {
+        // Subscribe to private Pusher channel for this room
+        const channel = pusherClient.subscribe(`private-game-${roomId}`);
+        channelRef.current = channel;
+
+        channel.bind('pusher:subscription_succeeded', async () => {
             setIsConnected(true);
-            if (action === 'create') {
-                socket.emit('create-room', roomId);
-                setPlayerSymbol('X');
-            } else {
-                socket.emit('join-room', roomId);
-                // Symbol will be determined if they join successfully (they will be 'O' or spec)
+
+            try {
+                if (action === 'create') {
+                    const res = await fetch('/api/game/create-room', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ roomId, playerId }),
+                    });
+                    const data = await res.json();
+                    if (!res.ok) {
+                        // Room might already exist — try joining instead
+                        if (res.status === 409) {
+                            await joinRoom(roomId, playerId);
+                        } else {
+                            setErrorMsg(data.error || 'Failed to create room');
+                        }
+                        return;
+                    }
+                    setPlayerSymbol(data.symbol);
+                    setGameState(data.gameState);
+                } else {
+                    await joinRoom(roomId, playerId);
+                }
+            } catch {
+                setErrorMsg('Failed to connect to the server. Please try again.');
             }
         });
 
-        socket.on('game-state-update', (state: GameState) => {
+        channel.bind('pusher:subscription_error', () => {
+            setErrorMsg('Failed to join the room channel. Please try again.');
+        });
+
+        channel.bind('game-state-update', (state: GameState) => {
             setGameState(state);
+        });
 
-            // If we joined, figure out what symbol we should be based on if X is taken.
-            // But since the server handles X and O assignment, we should just assume if we joined we are O (or observer).
-            // A better way is server sending us our player object, but for simplicity:
-            if (action === 'join' && !playerSymbol) {
-                setPlayerSymbol('O');
+        channel.bind('player-joined', (data: { playersCount: number }) => {
+            if (data.playersCount >= 2) {
+                setIsOpponentConnected(true);
+                toast.success('Opponent joined!');
             }
         });
 
-        socket.on('room-full', () => {
-            setErrorMsg('This room is currently full.');
-            toast.error('Room is full!');
-        });
-
-        socket.on('player-disconnected', () => {
+        channel.bind('player-disconnected', () => {
+            setIsOpponentConnected(false);
             toast.warning('Opponent disconnected');
-            setPlayersCounter(prev => Math.max(0, prev - 1));
-        });
-
-        socket.on('error', (msg: string) => {
-            setErrorMsg(msg);
-            toast.error(msg);
         });
 
         return () => {
-            socket.off('connect');
-            socket.off('game-state-update');
-            socket.off('room-full');
-            socket.off('player-disconnected');
-            socket.off('error');
-            socket.disconnect();
+            const pid = playerIdRef.current;
+            if (pid) {
+                fetch('/api/game/leave-room', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ roomId, playerId: pid }),
+                }).catch(() => {});
+            }
+            channel.unbind_all();
+            pusherClient.unsubscribe(`private-game-${roomId}`);
         };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [roomId, action]);
 
-    // Hacky way to detect opponent connection based on game state updates or just basic inference
-    // Since we don't have a direct player list sync in this basic implementation, we assume opponent is there
-    // if we are O, X must be there. If we are X and it's O's turn or a move has been made, O is there.
-    // We'll update our server to broadcast players later if needed, but for now we'll just derive it roughly.
-    // Actually, wait, player-disconnected fires. Let's assume if we are X, opponent is connected if they joined.
-    // A better way is the server broadcasting "player-joined".
-    // For now, let's just consider them connected if it's their turn or game state gets updated with their move.
+    async function joinRoom(rId: string, pid: string) {
+        const res = await fetch('/api/game/join-room', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ roomId: rId, playerId: pid }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+            const msg = res.status === 409 ? 'This room is currently full.' : (data.error || 'Room not found');
+            setErrorMsg(msg);
+            if (res.status === 409) toast.error('Room is full!');
+            return;
+        }
+        setPlayerSymbol(data.symbol);
+        setGameState(data.gameState);
+        // If room already has 2 players (reconnect scenario), mark opponent as connected
+        if (data.gameState) setIsOpponentConnected(true);
+    }
 
-    const handleSquareClick = (index: number) => {
+    const handleSquareClick = async (index: number) => {
         if (!gameState || !playerSymbol) return;
         if (gameState.currentTurn !== playerSymbol) return;
         if (gameState.board[index] !== null) return;
 
-        socket.emit('player-move', {
-            roomId,
-            index,
-            playerId: socket.id,
-        } as MovePayload);
+        await fetch('/api/game/player-move', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ roomId, index, playerId: playerIdRef.current }),
+        });
     };
 
-    const handleRestart = () => {
-        socket.emit('restart-game', roomId);
+    const handleRestart = async () => {
+        await fetch('/api/game/restart', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ roomId }),
+        });
     };
 
     if (errorMsg) {
@@ -127,10 +180,6 @@ export default function GameRoom({ params }: { params: Promise<{ roomId: string 
         );
     }
 
-    // Very basic opponent detection (since we didn't add a "player-joined" event to the server)
-    // Easiest heuristic for this implementation:
-    const isOpponentConnected = true; // In a full prod app, we'd sync the players array.
-
     return (
         <div className="min-h-screen flex flex-col items-center bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-slate-900 via-slate-950 to-black">
             <Navbar />
@@ -142,7 +191,7 @@ export default function GameRoom({ params }: { params: Promise<{ roomId: string 
                     <GameBoard
                         gameState={gameState}
                         onSquareClick={handleSquareClick}
-                        disabled={!isConnected}
+                        disabled={!isConnected || !isOpponentConnected}
                         playerSymbol={playerSymbol}
                     />
                 </div>
@@ -151,7 +200,7 @@ export default function GameRoom({ params }: { params: Promise<{ roomId: string 
                 <div className="w-full max-w-md order-1 lg:order-2">
                     <RoomControls
                         roomId={roomId}
-                        players={[]} // We aren't fully using this array in the UI directly right now
+                        players={[]}
                         gameState={gameState}
                         playerSymbol={playerSymbol}
                         onRestart={handleRestart}

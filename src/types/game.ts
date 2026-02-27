@@ -1,9 +1,9 @@
 export type SquareValue = 'X' | 'O' | null;
 
 export interface Player {
-  id: string; // Socket ID
+  id: string; // Unique player ID (stored in sessionStorage)
   symbol: 'X' | 'O';
-  socketId: string;
+  socketId: string; // kept for compatibility — same as id
 }
 
 export interface GameState {
