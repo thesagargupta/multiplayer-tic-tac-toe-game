@@ -129,20 +129,39 @@ export default function GameRoom({ params }: { params: Promise<{ roomId: string 
         if (data.gameState) setIsOpponentConnected(true);
     }
 
-    const handleSquareClick = async (index: number) => {
+    const handleSquareClick = (index: number) => {
         if (!gameState || !playerSymbol) return;
         if (gameState.currentTurn !== playerSymbol) return;
         if (gameState.board[index] !== null) return;
+        if (gameState.winner || gameState.isDraw) return;
 
-        await fetch('/api/game/player-move', {
+        // ── Optimistic update: render instantly without waiting for server ──
+        const newBoard = gameState.board.slice() as typeof gameState.board;
+        newBoard[index] = playerSymbol;
+        setGameState(prev => prev ? { ...prev, board: newBoard, currentTurn: playerSymbol === 'X' ? 'O' : 'X' } : prev);
+
+        // Fire-and-forget — Pusher will push back the authoritative state
+        fetch('/api/game/player-move', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ roomId, index, playerId: playerIdRef.current }),
+        }).catch(() => {
+            // Revert on network error
+            setGameState(prev => prev ? { ...prev, board: gameState.board, currentTurn: gameState.currentTurn } : prev);
         });
     };
 
-    const handleRestart = async () => {
-        await fetch('/api/game/restart', {
+    const handleRestart = () => {
+        // Optimistic reset
+        setGameState(prev => prev ? {
+            board: Array(9).fill(null),
+            currentTurn: 'X',
+            winner: null,
+            isDraw: false,
+            winningLine: null,
+        } : prev);
+
+        fetch('/api/game/restart', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ roomId }),

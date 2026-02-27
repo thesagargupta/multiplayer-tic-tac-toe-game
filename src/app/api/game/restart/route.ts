@@ -11,8 +11,10 @@ export async function POST(req: NextRequest) {
     if (!room) return NextResponse.json({ error: 'Room not found' }, { status: 404 });
 
     room.gameState = getInitialGameState();
-    await setRoom(roomId, room);
-    await pusherServer.trigger(`private-game-${roomId}`, 'game-state-update', room.gameState);
+    await Promise.all([
+        setRoom(roomId, room),
+        pusherServer.trigger(`private-game-${roomId}`, 'game-state-update', room.gameState),
+    ]);
 
     return NextResponse.json({ success: true });
 }

@@ -37,8 +37,11 @@ export async function POST(req: NextRequest) {
         }
     }
 
-    await setRoom(roomId, room);
-    await pusherServer.trigger(`private-game-${roomId}`, 'game-state-update', gameState);
+    // Run Redis write and Pusher trigger in parallel for minimum latency
+    await Promise.all([
+        setRoom(roomId, room),
+        pusherServer.trigger(`private-game-${roomId}`, 'game-state-update', gameState),
+    ]);
 
     return NextResponse.json({ success: true });
 }
